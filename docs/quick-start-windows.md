@@ -8,12 +8,18 @@ Install Node.js 20 or newer from:
 
 - `https://nodejs.org/`
 
-Then open PowerShell and check it:
+Then open PowerShell **as Administrator** and check it:
 
 ```powershell
 node --version
 npm --version
 ```
+
+**If npm fails with "execution of scripts was disabled":**
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+Type `Y` to confirm. Close and reopen PowerShell.
 
 ## 2. Install OpenClaude
 
