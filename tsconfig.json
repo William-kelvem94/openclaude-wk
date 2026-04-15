@@ -10,7 +10,6 @@
     "noImplicitReturns": false,
     "noFallthroughCasesInSwitch": false,
     "esModuleInterop": true,
-    "ignoreDeprecations": "6.0",
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
