@@ -6,6 +6,16 @@ import { registerDebugSkill } from './debug.js'
 import { registerKeybindingsSkill } from './keybindings.js'
 import { registerSimplifySkill } from './simplify.js'
 import { registerUpdateConfigSkill } from './updateConfig.js'
+import { registerSecurityAuditSkill } from './securityAudit.js'
+import { registerDocSyncSkill } from './docSync.js'
+import { registerTestGenSkill } from './testGen.js'
+import { registerFastAnalysisSkill } from './fastAnalysis.js'
+import { registerReasoningChainSkill } from './reasoningChain.js'
+import { registerCodeArchitectSkill } from './codeArchitect.js'
+import { registerFullstackAuditSkill } from './fullstackAudit.js'
+import { registerTokenOptimizerSkill } from './tokenOptimizer.js'
+import { registerDeepDebugSkill } from './deepDebug.js'
+import { registerAiExpertSkill } from './aiExpert.js'
 
 /**
  * Initialize all bundled skills.
@@ -22,6 +32,16 @@ export function initBundledSkills(): void {
   registerDebugSkill()
   registerSimplifySkill()
   registerBatchSkill()
+  registerSecurityAuditSkill()
+  registerDocSyncSkill()
+  registerTestGenSkill()
+  registerFastAnalysisSkill()
+  registerReasoningChainSkill()
+  registerCodeArchitectSkill()
+  registerFullstackAuditSkill()
+  registerTokenOptimizerSkill()
+  registerDeepDebugSkill()
+  registerAiExpertSkill()
   if (feature('KAIROS') || feature('KAIROS_DREAM')) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { registerDreamSkill } = require('./dream.js')

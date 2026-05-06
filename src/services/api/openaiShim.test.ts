@@ -1857,6 +1857,37 @@ test('coalesces consecutive user messages to avoid alternation errors (issue #20
   expect(userContent).toContain('second message')
 })
 
+test('flattens array-style content blocks to a single string for OpenAI-compatible requests', async () => {
+  let sentMessages: Array<{ role: string; content: unknown }> | undefined
+
+  globalThis.fetch = (async (_input: unknown, init: RequestInit | undefined) => {
+    sentMessages = JSON.parse(String(init?.body)).messages
+    return makeNonStreamResponse()
+  }) as FetchType
+
+  const client = createOpenAIShimClient({}) as OpenAIShimClient
+
+  await client.beta.messages.create({
+    model: 'test-model',
+    system: 'sys',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'hello' },
+          { type: 'text', text: ' world' },
+        ],
+      },
+    ],
+    max_tokens: 64,
+    stream: false,
+  })
+
+  expect(sentMessages?.[1]?.role).toBe('user')
+  expect(typeof sentMessages?.[1]?.content).toBe('string')
+  expect(sentMessages?.[1]?.content).toBe('hello world')
+})
+
 test('coalesces consecutive assistant messages preserving tool_calls (issue #202)', async () => {
   let sentMessages: Array<{ role: string; content: unknown; tool_calls?: unknown[] }> | undefined
 

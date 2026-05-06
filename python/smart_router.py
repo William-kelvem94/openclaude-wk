@@ -93,17 +93,11 @@ def build_default_providers() -> list[Provider]:
     big = os.getenv("BIG_MODEL", "gpt-4.1")
     small = os.getenv("SMALL_MODEL", "gpt-4.1-mini")
     ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    atomic_chat_url = os.getenv("ATOMIC_CHAT_BASE_URL", "http://127.0.0.1:1337")
+    lm_studio_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
+    openrouter_url = "https://openrouter.ai/api/v1"
+    nvidia_url = "https://integrate.api.nvidia.com/v1"
 
     return [
-        Provider(
-            name="openai",
-            ping_url="https://api.openai.com/v1/models",
-            api_key_env="OPENAI_API_KEY",
-            cost_per_1k_tokens=0.002,
-            big_model=big if "gpt" in big else "gpt-4.1",
-            small_model=small if "gpt" in small else "gpt-4.1-mini",
-        ),
         Provider(
             name="gemini",
             ping_url="https://generativelanguage.googleapis.com/v1/models",
@@ -113,20 +107,28 @@ def build_default_providers() -> list[Provider]:
             small_model=small if "gemini" in small else "gemini-2.0-flash",
         ),
         Provider(
-            name="ollama",
-            ping_url=f"{ollama_url}/api/tags",
+            name="lm-studio",
+            ping_url=f"{lm_studio_url}/v1/models",
             api_key_env="",
-            cost_per_1k_tokens=0.0,   # free — local
-            big_model=big if "gemini" not in big and "gpt" not in big else "llama3:8b",
-            small_model=small if "gemini" not in small and "gpt" not in small else "llama3:8b",
+            cost_per_1k_tokens=0.0,
+            big_model=big if "gemini" not in big and "gpt" not in big else "local-big",
+            small_model=small if "gemini" not in small and "gpt" not in small else "local-small",
         ),
         Provider(
-            name="atomic-chat",
-            ping_url=f"{atomic_chat_url}/v1/models",
-            api_key_env="",
-            cost_per_1k_tokens=0.0,   # free — local (Apple Silicon)
-            big_model=big if "gemini" not in big and "gpt" not in big else "llama3:8b",
-            small_model=small if "gemini" not in small and "gpt" not in small else "llama3:8b",
+            name="openrouter",
+            ping_url=f"{openrouter_url}/models",
+            api_key_env="OPENROUTER_API_KEY",
+            cost_per_1k_tokens=0.002,
+            big_model=big if "openrouter" in big else "anthropic/claude-3.5-sonnet",
+            small_model=small if "openrouter" in small else "anthropic/claude-3-haiku",
+        ),
+        Provider(
+            name="nvidia",
+            ping_url=f"{nvidia_url}/models",
+            api_key_env="NVIDIA_API_KEY",
+            cost_per_1k_tokens=0.001,
+            big_model=big if "nvidia" in big else "meta/llama-3.1-405b",
+            small_model=small if "nvidia" in small else "meta/llama-3.1-8b",
         ),
     ]
 
@@ -213,11 +215,17 @@ class SmartRouter:
 
     # ── Routing logic ─────────────────────────────────────────────────────────
 
-    def select_provider(self, is_large_request: bool = False) -> Optional[Provider]:
+    def select_provider(self, messages: list[dict] = None) -> Optional[Provider]:
         """
-        Pick the best available provider for this request.
-        Returns None if no providers are available.
+        Pick the priority hierarchy:
+        1. Gemini API
+        2. NVIDIA API
+        3. LM Studio
+        4. OpenRouter
         """
+        # Deterministic priority order
+        priority_order = ["gemini", "nvidia", "lm-studio", "openrouter"]
+
         available = [
             p for p in self.providers
             if p.healthy and p.is_configured
@@ -225,6 +233,31 @@ class SmartRouter:
         if not available:
             return None
 
+        # Complexity detection: 'Fast Thinking' vs 'Deep Thinking'
+        # Fast Thinking: Small tasks use the hierarchy but prioritize efficiency/speed
+        # Deep Thinking: Large/Complex tasks strictly follow the high-power hierarchy
+        is_complex = False
+        if messages:
+            total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            is_complex = total_chars > 1000 # Threshold for "Deep Thinking"
+
+        if not is_complex:
+            # 'Fast Thinking' mode: Try to find the first available provider in hierarchy
+            # that is known for speed (Gemini Flash or Local)
+            # In this hierarchy, Gemini is first, then NVIDIA, then Local.
+            # We follow the strict hierarchy but acknowledge this as 'Fast Thinking' path.
+            logger.debug("SmartRouter: Fast Thinking mode engaged")
+
+        else:
+            logger.debug("SmartRouter: Deep Thinking mode engaged")
+
+        # Follow the strict priority hierarchy for both modes to ensure failover transparency
+        for target in priority_order:
+            provider = next((p for p in available if p.name == target), None)
+            if provider:
+                return provider
+
+        # Absolute fallback to the best scoring if priority list fails
         return min(available, key=lambda p: p.score(self.strategy))
 
     def get_model_for_provider(
@@ -266,15 +299,8 @@ class SmartRouter:
         exclude_providers: Optional[list[str]] = None,
     ) -> dict:
         """
-        Route a request to the best provider.
-        Returns a dict with routing decision info:
-          {
-            "provider": provider name,
-            "model": actual model to use,
-            "api_key": API key for the provider,
-            "base_url": base URL for the provider,
-          }
-        Raises RuntimeError if no providers available.
+        Route a request to the best provider using the priority hierarchy.
+        Returns a dict with routing decision info.
         """
         if not self._initialized:
             await self.initialize()
@@ -282,18 +308,28 @@ class SmartRouter:
         exclude = set(exclude_providers or [])
         large = self.is_large_request(messages)
 
-        available = [
-            p for p in self.providers
-            if p.healthy and p.is_configured and p.name not in exclude
-        ]
+        # Use the new hierarchy-based selection
+        provider = self.select_provider(messages=messages)
 
-        if not available:
-            raise RuntimeError(
+        # If the selected provider is excluded, try to find another from the hierarchy
+        if provider and provider.name in exclude:
+            available_available = [
+                p for p in self.providers
+                if p.healthy and p.is_configured and p.name not in exclude
+            ]
+            if not _available:
+                raise RuntimeError(
+                    "SmartRouter: no providers available. "
+                    "Check your API keys and provider health."
+                )
+            # Fallback to the best remaining available provider
+            provider = min(_available, key=lambda p: p.score(self.strategy))
+        elif not provider:
+             raise RuntimeError(
                 "SmartRouter: no providers available. "
                 "Check your API keys and provider health."
             )
 
-        provider = min(available, key=lambda p: p.score(self.strategy))
         model = self.get_model_for_provider(
             provider,
             claude_model,
@@ -302,7 +338,7 @@ class SmartRouter:
 
         logger.debug(
             f"SmartRouter: routing to {provider.name}/{model} "
-            f"(strategy={self.strategy}, large={large}, attempt={attempt})"
+            f"(hierarchy_selection, large={large}, attempt={attempt})"
         )
 
         return {

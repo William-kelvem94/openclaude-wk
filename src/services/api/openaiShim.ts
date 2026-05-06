@@ -214,6 +214,22 @@ function convertContentBlocks(
   return parts
 }
 
+function convertContentToString(content: unknown): string {
+  const converted = convertContentBlocks(content)
+  if (typeof converted === 'string') return converted
+  if (!Array.isArray(converted)) return String(converted ?? '')
+  return converted
+    .map(block => {
+      if (block.type === 'text') return block.text ?? ''
+      if (block.type === 'image_url') {
+        return block.image_url?.url ? `[Image](${block.image_url.url})` : '[image]'
+      }
+      return block.text ?? ''
+    })
+    .filter(Boolean)
+    .join('')
+}
+
 function isGeminiMode(): boolean {
   return (
     isEnvTruthy(process.env.CLAUDE_CODE_USE_GEMINI) ||
@@ -259,13 +275,13 @@ function convertMessages(
         if (otherContent.length > 0) {
           result.push({
             role: 'user',
-            content: convertContentBlocks(otherContent),
+            content: convertContentToString(otherContent),
           })
         }
       } else {
         result.push({
           role: 'user',
-          content: convertContentBlocks(content),
+          content: convertContentToString(content),
         })
       }
     } else if (role === 'assistant') {
@@ -279,10 +295,7 @@ function convertMessages(
 
         const assistantMsg: OpenAIMessage = {
           role: 'assistant',
-          content: (() => {
-            const c = convertContentBlocks(textContent)
-            return typeof c === 'string' ? c : Array.isArray(c) ? c.map((p: { text?: string }) => p.text ?? '').join('') : ''
-          })(),
+          content: convertContentToString(textContent),
         }
 
         if (toolUses.length > 0) {
@@ -339,10 +352,7 @@ function convertMessages(
       } else {
         result.push({
           role: 'assistant',
-          content: (() => {
-            const c = convertContentBlocks(content)
-            return typeof c === 'string' ? c : Array.isArray(c) ? c.map((p: { text?: string }) => p.text ?? '').join('') : ''
-          })(),
+          content: convertContentToString(content),
         })
       }
     }
